@@ -40,33 +40,78 @@ namespace Logica
             BuscarEstudiante("");
         }
 
+        // Validación única para usar DESDE el form y DESDE Registrar()
+        public (bool ok, string mensaje) ValidarCampo(string campo, string valor, int? idActual = null)
+        {
+            valor = (valor ?? "").Trim();
+
+            switch (campo.ToLower())
+            {
+                case "dni":
+                    if (string.IsNullOrEmpty(valor))
+                        return (false, "El DNI es obligatorio.");
+
+                    
+                    if (!int.TryParse(valor, out var dniNum) || dniNum < 1_000_000 || dniNum > 99_999_999)
+                        return (false, "DNI inválido (7-8 dígitos).");
+
+                    
+                    if (ExisteDni(valor, idActual))
+                        return (false, "DNI ya registrado.");
+
+                    return (true, "DNI ✔");
+
+                case "nombre":
+                    if (string.IsNullOrEmpty(valor))
+                        return (false, "El Nombre es obligatorio.");
+                    return (true, "Nombre ✔");
+
+                case "apellido":
+                    if (string.IsNullOrEmpty(valor))
+                        return (false, "El Apellido es obligatorio.");
+                    return (true, "Apellido ✔");
+
+                case "email":
+                    if (string.IsNullOrEmpty(valor))
+                        return (false, "El Email es obligatorio.");
+
+                    if (!textBoxEvent.comprobarFormatoEmail(valor))
+                        return (false, "Formato de Email Incorrecto.");
+
+                    if (ExisteEmail(valor, idActual))
+                        return (false, "Email ya registrado.");
+
+                    return (true, "Email ✔");
+
+                default:
+                    return (true, "");
+            }
+        }
+
 
         public void Registrar()
         {
+            // id actual (0 = insert)
+            int? idActual = accion == "update" ? (int?)idEstudianteSeleccionado : null;
 
-            // VALIDACIONES
-            if (listTextBox[0].Text.Equals(""))
-            { SetError(0, "El DNI es obligatorio."); return; }
-
-            if (listTextBox[1].Text.Equals(""))
-            { SetError(1, "El Nombre es obligatorio."); return; }
-
-            if (listTextBox[2].Text.Equals(""))
-            { SetError(2, "El Apellido es obligatorio."); return; }
-
-            if (listTextBox[3].Text.Equals(""))
-            { SetError(3, "El Email es obligatorio."); return; }
-
-            if (!textBoxEvent.comprobarFormatoEmail(listTextBox[3].Text))
-            {SetError(3, "Formato de Email Incorrecto."); return;}
-
-
-            //VALIDACIÓN ROBUSTA DEL DNI
-            var dniTexto = listTextBox[0].Text.Trim();
-            if (!int.TryParse(dniTexto, out var dni) || dni < 1_000_000 || dni > 99_999_999)
+            // mismos campos que en el form
+            var campos = new (string nombre, string valor, int idx)[]
             {
-                SetError(0, "DNI inválido (7-8 dígitos).");
-                return;
+                ("dni",      listTextBox[0].Text, 0),
+                ("nombre",   listTextBox[1].Text, 1),
+                ("apellido", listTextBox[2].Text, 2),
+                ("email",    listTextBox[3].Text, 3)
+            };
+
+            // validar todos con la MISMA lógica
+            foreach (var c in campos)
+            {
+                var (ok, msg) = ValidarCampo(c.nombre, c.valor, idActual);
+                if (!ok)
+                {
+                    SetError(c.idx, msg);   // esto sigue pintando el label rojo en el form
+                    return;
+                }
             }
 
             // Imagen (puede ser null y está OK)
@@ -81,7 +126,9 @@ namespace Logica
                     // INSERTAR EN LA BASE DE DATOS
                     db.BeginTransaction();
 
-                    var email = (listTextBox[3].Text ?? "").Trim().ToLowerInvariant();
+                    var dniTexto = listTextBox[0].Text.Trim();
+                    var dni = int.Parse(dniTexto);
+                    var email = listTextBox[3].Text.Trim().ToLowerInvariant();
 
                     //Insertar
                     if (accion == "insert")
@@ -123,7 +170,7 @@ namespace Logica
                     }
                     else  //Actualizar
                     {
-                        // Traigo el actual desde la lista cacheada (tenés la imagen previa)
+                        // Traigo el actual desde la lista cacheada
                         var actual = listEstudiante?.FirstOrDefault(x => x.Id == idEstudianteSeleccionado);
                         if (actual == null)
                         {
@@ -221,7 +268,7 @@ namespace Logica
 
                     _paginador = new Paginador<Estudiante>(listEstudiante, listLabel[4], pageSize);
 
-                    // (3) USAR HELPER PARA PINTAR LA PÁGINA
+                    //USAR HELPER PARA PINTAR LA PÁGINA
                     int inicio = _paginador.primero();
                     PintarPagina(inicio, pageSize);
                 }
@@ -260,7 +307,7 @@ namespace Logica
             // Si todavía no hay lista (app recién carga), trae
             if (listEstudiante == null)
             {
-                BuscarEstudiante(""); 
+                BuscarEstudiante("");
                 return;
             }
 
@@ -281,7 +328,7 @@ namespace Logica
 
             accion = "update";
 
-            
+
             var id = Convert.ToInt32(dataGridView.CurrentRow.Cells[0].Value);
 
             // Buscamos el entity completo en la lista cacheada
@@ -303,7 +350,7 @@ namespace Logica
 
         private void Restablecer()
         {
-            // liberar la imagen actual (evita locks si cargaste desde archivo)
+            // liberar la imagen actual
             pictureBoxImage.Image?.Dispose();
 
             // restaurar la imagen por defecto
@@ -325,7 +372,7 @@ namespace Logica
             accion = "insert";
             idEstudianteSeleccionado = 0;
 
-            // liberar la imagen actual (si corresponde)
+            // liberar la imagen actual
             pictureBoxImage.Image?.Dispose();
             pictureBoxImage.Image = _imageBitmap != null ? (Image)_imageBitmap.Clone() : null;
 
@@ -337,16 +384,16 @@ namespace Logica
             listLabel[3].Text = "Email";
             foreach (var lbl in listLabel) lbl.ForeColor = Color.SteelBlue;
 
-            // opcional: limpiar selección del grid
+            //limpiar selección del grid
             dataGridView.ClearSelection();
 
-            // refrescar lista (si querés mantener la tabla visible actualizada)
+            // refrescar lista
             BuscarEstudiante("");
         }
 
         public void EliminarEstudiante()
         {
-            // Debe estar en modo update (alguien cargado con GetEstudiante)
+            // Debe estar en modo update
             if (accion != "update" || idEstudianteSeleccionado == 0)
             {
                 MessageBox.Show("Seleccioná un estudiante (clic en la fila) para eliminar.",
@@ -388,7 +435,7 @@ namespace Logica
                 }
 
                 // Volver a modo inserción y refrescar UI
-                LimpiarCampos();          // tu helper que hace accion="insert" y Restablecer()
+                LimpiarCampos();         
                 MessageBox.Show("Estudiante eliminado correctamente.", "Éxito",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -402,7 +449,7 @@ namespace Logica
 
 
         // =========================================================
-        // (3) HELPER: renderiza la página actual en el DataGridView
+        // HELPER: renderiza la página actual en el DataGridView
         // =========================================================
         private void PintarPagina(int inicio, int pageSize)
         {
@@ -437,5 +484,36 @@ namespace Logica
             listTextBox[idx].Focus();
         }
 
+        // --- helpers de validación para el Form ---
+        // ID del estudiante que está seleccionado (0 si estamos en modo insert)
+        public int EstudianteSeleccionadoId => idEstudianteSeleccionado;
+
+        public bool ExisteDni(string dniTexto, int? excluirId = null)
+        {
+            if (string.IsNullOrWhiteSpace(dniTexto)) return false;
+            if (!int.TryParse(dniTexto, out var dniNum)) return false;
+
+            using (var db = new Conexion())
+            {
+                var q = db.EstudianteTabla.Where(e => e.Dni == dniNum);
+                if (excluirId.HasValue && excluirId.Value > 0)
+                    q = q.Where(e => e.Id != excluirId.Value);
+                return q.Any();
+            }
+        }
+
+        public bool ExisteEmail(string email, int? excluirId = null)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            email = email.Trim().ToLowerInvariant();
+
+            using (var db = new Conexion())
+            {
+                var q = db.EstudianteTabla.Where(e => e.Email.ToLower() == email);
+                if (excluirId.HasValue && excluirId.Value > 0)
+                    q = q.Where(e => e.Id != excluirId.Value);
+                return q.Any();
+            }
+        }
     }
 }
